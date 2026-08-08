@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Big Trouble in Little China: 16-Bit Arcade Edition</title>
+    <style>
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+body {
+    background-color: #0d0814;
+    color: #f7e6a1;
+    font-family: 'Courier New', Courier, monospace;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+}
+
+#game-container {
+    position: relative;
+    width: 1000px;
+    height: 750px;
+    background: #000;
+    box-shadow: 0 0 30px rgba(255, 0, 85, 0.4), 0 0 60px rgba(0, 240, 255, 0.2);
+    border: 4px solid #f6913b;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+
+.arcade-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+    background-size: 100% 4px;
+    z-index: 100;
+}
+
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas" width="1000" height="750"></canvas>
+        <div class="arcade-overlay"></div>
+    </div>
+    <script>
+/**
+ * BIG TROUBLE IN LITTLE CHINA: ARCADE EDITION
+ * 2D Action Fighting Game MVP
+ * Developed with Phaser-style Scene Architecture & Web Audio Synth Engine
+ */
+
+// ==========================================
+// 1. WEB AUDIO 80s ARCADE SOUND SYNTHESIZER
+// ==========================================
+class SoundEngine {
+    constructor() {
+        this.ctx = null;
+        this.masterVolume = 0.8;
+        this.musicVolume = 0.6;
+        this.sfxVolume = 0.8;
+        this.musicPlaying = false;
+        this.musicTimer = null;
+        this.noteIndex = 0;
+    }
+
+    init() {
+        if (!this.ctx) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            this.ctx = new AudioCtx();
+        }
+        if (this.ctx.state === 'suspended') {
+            this.ctx.resume();
+        }
+    }
+
+    playTone(freq, type, duration, volScale = 1.0) {
+        if (!this.ctx) return;
+        try {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+            
+            const totalVol = this.masterVolume * this.sfxVolume * volScale * 0.3;
+            gain.gain.setValueAtTime(totalVol, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+
+            osc.start();
+            osc.stop(this.ctx.currentTime + duration);
+        } catch(e){}
+    }
+
+    playNoise(duration, volScale = 1.0) {
+        if (!this.ctx) return;
+        try {
+            const bufferSize = this.ctx.sampleRate * duration;
+            const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = Math.random() * 2 - 1;
+            }
+            const noise = this.ctx.createBufferSource();
+            noise.buffer = buffer;
+
+            const gain = this.ctx.createGain();
+            const totalVol = this.masterVolume * this.sfxVolume * volScale * 0.25;
+            gain.gain.setValueAtTime(totalVol, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+
+            noise.connect(gain);
+            gain.connect(this.ctx.destination);
+
+            noise.start();
+        } catch(e){}
+    }
+
+    playSelect() {
+        this.init();
+        this.playTone(440, 'square', 0.08, 0.8);
+        setTimeout(() => this.playTone(880, 'square', 0.1, 0.8), 50);
+    }
+
+    playCoin() {
+        this.init();
+        this.playTone(987.77, 'square', 0.08, 1.0);
+        setTimeout(() => this.playTone(1318.51, 'square', 0.25, 1.0), 80);
+    }
+
+    playPunch() {
+        this.init();
+        this.playNoise(0.12, 1.0);
+        this.playTone(150, 'sawtooth', 0.1, 0.8);
+    }
+
+    playKick() {
+        this.init();
+        this.playNoise(0.18, 1.2);
+        this.playTone(100, 'triangle', 0.15, 1.0);
+    }
+
+    playFireball() {
+        this.init();
+        if (!this.ctx) return;
+        try {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(600, this.ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(150, this.ctx.currentTime + 0.35);
+
+            const totalVol = this.masterVolume * this.sfxVolume * 0.7;
+            gain.gain.setValueAtTime(totalVol, this.ctx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.35);
+
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start();
+            osc.stop(this.ctx.currentTime + 0.35);
+        } catch(e){}
+    }
+
+    playSuper() {
+        this.init();
+        this.playTone(220, 'square', 0.1, 1.0);
+        setTimeout(() => this.playTone(440, 'square', 0.1, 1.0), 100);
+        setTimeout(() => this.playTone(880, 'square', 0.1, 1.0), 200);
+        setTimeout(() => this.playTone(1760, 'sawtooth', 0.3, 1.2), 300);
+    }
+
+    playKO() {
+        this.init();
+        this.playTone(130.81, 'sawtooth', 0.3, 1.2);
+        setTimeout(() => this.playTone(116.54, 'sawtooth', 0.3, 1.2), 200);
+        setTimeout(() => this.playTone(98.00, 'sawtooth', 0.6, 1.5), 400);
+    }
+
+    startMusic() {
+        this.init();
+        if (this.musicPlaying) return;
+        this.musicPlaying = true;
+        const melody = [
+            220, 220, 261.63, 220, 293.66, 220, 261.63, 246.94,
+            196, 196, 246.94, 196, 261.63, 196, 246.94, 220
+        ];
+        
+        const step = () => {
+            if (!this.musicPlaying) return;
+            const note = melody[this.noteIndex % melody.length];
+            const bass = note / 2;
+            
+            if (this.masterVolume > 0 && this.musicVolume > 0) {
+                this.playTone(bass, 'sawtooth', 0.12, this.musicVolume * 0.5);
+                if (this.noteIndex % 2 === 0) {
+                    this.playTone(note, 'square', 0.1, this.musicVolume * 0.4);
+                }
+            }
+            this.noteIndex++;
+            this.musicTimer = setTimeout(step, 180);
+        };
+        step();
+    }
+
+    stopMusic() {
+        this.musicPlaying = false;
+        if (this.musicTimer) clearTimeout(this.musicTimer);
+    }
+}
+
+const audio = new SoundEngine();
+
+
+// ==========================================
+// 2. PROCEDURAL PIXEL ART GRAPHICS GENERATOR
+// ==========================================
+class GraphicsGenerator {
+    constructor() {
+        this.cache = {};
+    }
+
+    createCanvas(w, h) {
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        return { canvas, ctx: canvas.getContext('2d') };
+    }
+
+    getJackSprite(state) {
+        const key = 'jack_' + state;
+        if (this.cache[key]) return this.cache[key];
+
+        const { canvas, ctx } = this.createCanvas(120, 160);
+        ctx.imageSmoothingEnabled = false;
+
+        // Colors
+        const skin = '#f2be9b';
+        const hair = '#a36224';
+        const shirt = '#f5f5f5';
+        const jeans = '#2b588c';
+        const boots = '#804f21';
+
+        // Head & Mullet Hair
+        ctx.fillStyle = hair;
+        ctx.fillRect(40, 15, 36, 35); // Hair back
+        ctx.fillStyle = skin;
+        ctx.fillRect(45, 25, 26, 25); // Face
+        ctx.fillStyle = hair;
+        ctx.fillRect(43, 12, 30, 15); // Mullet top
+
+        // Eyes / Brows
+        ctx.fillStyle = '#3a220f';
+        ctx.fillRect(52, 32, 6, 4);
+        ctx.fillRect(63, 32, 6, 4);
+
+        // Body (Tank Top)
+        ctx.fillStyle = shirt;
+        ctx.fillRect(45, 50, 28, 45); // Tank top body
+        
+        // Shirt logo (Fu Manchu / Japanese Sun graphic)
+        ctx.fillStyle = '#d63636';
+        ctx.beginPath();
+        ctx.arc(59, 70, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Arms (Muscular)
+        ctx.fillStyle = skin;
+        if (state === 'punch') {
+            ctx.fillRect(30, 52, 16, 12); // Left arm
+            ctx.fillRect(72, 52, 38, 14); // Extended Punch Arm!
+            ctx.fillStyle = '#fce2cd';
+            ctx.fillRect(108, 50, 12, 18); // Fist
+        } else if (state === 'kick') {
+            ctx.fillRect(32, 52, 14, 25);
+            ctx.fillRect(72, 52, 14, 25);
+        } else if (state === 'super') {
+            // Pointing finger stance ("It's all in the reflexes!")
+            ctx.fillRect(25, 52, 20, 14);
+            ctx.fillRect(72, 48, 32, 12);
+            ctx.fillStyle = skin;
+            ctx.fillRect(104, 46, 14, 6); // Pointing finger
+        } else {
+            // Guard / Idle stance
+            ctx.fillRect(30, 52, 15, 28);
+            ctx.fillRect(73, 50, 16, 28);
+        }
+
+        // Pants (Blue Jeans) & Belt
+        ctx.fillStyle = '#3b2314';
+        ctx.fillRect(44, 93, 30, 6); // Belt
+        ctx.fillStyle = jeans;
+
+        if (state === 'kick') {
+            ctx.fillRect(45, 99, 16, 25); // Standing leg
+            ctx.fillRect(61, 95, 45, 18); // Horizontal Extended Kick Leg!
+            ctx.fillStyle = boots;
+            ctx.fillRect(104, 93, 16, 22); // Boot Kick
+        } else if (state === 'walk') {
+            ctx.fillRect(40, 99, 16, 38);
+            ctx.fillRect(62, 99, 16, 38);
+            ctx.fillStyle = boots;
+            ctx.fillRect(36, 137, 20, 15);
+            ctx.fillRect(62, 137, 20, 15);
+        } else {
+            ctx.fillRect(42, 99, 16, 40);
+            ctx.fillRect(60, 99, 16, 40);
+            ctx.fillStyle = boots;
+            ctx.fillRect(38, 139, 20, 15);
+            ctx.fillRect(60, 139, 20, 15);
+        }
+
+        this.cache[key] = canvas;
+        return canvas;
+    }
+
+    getLoPanSprite(state) {
+        const key = 'lopan_' + state;
+        if (this.cache[key]) return this.cache[key];
+
+        const { canvas, ctx } = this.createCanvas(130, 160);
+        ctx.imageSmoothingEnabled = false;
+
+        const robeBase = '#1c1c38';
+        const goldTrim = '#e0aa34';
+        const redAccent = '#a82020';
+        const skin = '#e3c1a4';
+
+        // Tall Emperor Crown / Hat
+        ctx.fillStyle = goldTrim;
+        ctx.fillRect(50, 5, 28, 25);
+        ctx.fillStyle = redAccent;
+        ctx.fillRect(54, 8, 20, 18);
+
+        // Face & Long Black Beard
+        ctx.fillStyle = skin;
+        ctx.fillRect(52, 30, 24, 22);
+        
+        // Glowing Green Eyes
+        ctx.fillStyle = '#00ff66';
+        ctx.fillRect(57, 36, 5, 4);
+        ctx.fillRect(66, 36, 5, 4);
+
+        // Long Beard
+        ctx.fillStyle = '#111111';
+        ctx.fillRect(50, 50, 28, 40);
+        ctx.fillRect(56, 90, 16, 20);
+
+        // Robes
+        ctx.fillStyle = robeBase;
+        ctx.fillRect(38, 52, 52, 95);
+
+        // Gold & Red Embroidery
+        ctx.fillStyle = goldTrim;
+        ctx.fillRect(58, 52, 12, 95);
+        ctx.fillStyle = redAccent;
+        ctx.fillRect(42, 70, 44, 8);
+
+        // Hands & Magic Attacks
+        ctx.fillStyle = skin;
+        if (state === 'attack' || state === 'magic') {
+            ctx.fillRect(18, 55, 22, 14); // Cast forward hand
+            ctx.fillRect(88, 50, 26, 14);
+            
+            // Glowing Green Magic Aura around hands
+            ctx.fillStyle = 'rgba(0, 255, 102, 0.6)';
+            ctx.beginPath();
+            ctx.arc(104, 57, 14, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            ctx.fillRect(25, 65, 16, 20);
+            ctx.fillRect(85, 65, 16, 20);
+        }
+
+        this.cache[key] = canvas;
+        return canvas;
+    }
+
+    getGreenSkullSprite() {
+        if (this.cache['green_skull']) return this.cache['green_skull'];
+        const { canvas, ctx } = this.createCanvas(50, 50);
+
+        // Green flaming skull projectile
+        ctx.fillStyle = '#00ff66';
+        ctx.beginPath();
+        ctx.arc(25, 25, 18, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Skull face details
+        ctx.fillStyle = '#0a2e14';
+        ctx.fillRect(16, 18, 7, 9); // Left eye socket
+        ctx.fillRect(27, 18, 7, 9); // Right eye socket
+        ctx.fillRect(23, 29, 4, 5); // Nose
+
+        // Teeth
+        ctx.fillRect(18, 36, 3, 5);
+        ctx.fillRect(22, 36, 3, 5);
+        ctx.fillRect(26, 36, 3, 5);
+        ctx.fillRect(30, 36, 3, 5);
+
+        this.cache['green_skull'] = canvas;
+        return canvas;
+    }
+
+    getStageBackground() {
+        if (this.cache['stage_bg']) return this.cache['stage_bg'];
+        const { canvas, ctx } = this.createCanvas(1000, 750);
+
+        // Dark Chinatown alley night sky
+        const grad = ctx.createLinearGradient(0, 0, 0, 750);
+        grad.addColorStop(0, '#0a0512');
+        grad.addColorStop(0.5, '#1e0f33');
+        grad.addColorStop(1, '#000000');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 1000, 750);
+
+        // Brick Buildings & Architecture
+        ctx.fillStyle = '#1f1329';
+        ctx.fillRect(50, 150, 320, 450);
+        ctx.fillRect(630, 120, 320, 480);
+
+        // Roof Pagoda Corners
+        ctx.fillStyle = '#8f1d1d';
+        ctx.fillRect(30, 140, 360, 15);
+        ctx.fillRect(610, 110, 360, 15);
+
+        // Neon Signboards
+        // "CHOP SUEY" Neon
+        ctx.fillStyle = 'rgba(0, 255, 150, 0.2)';
+        ctx.fillRect(90, 200, 220, 60);
+        ctx.strokeStyle = '#00ff99';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(90, 200, 220, 60);
+        ctx.fillStyle = '#00ff99';
+        ctx.font = 'bold 26px "Courier New", monospace';
+        ctx.fillText('CHOP SUEY', 120, 240);
+
+        // "COCKTAILS" Pink Neon
+        ctx.fillStyle = '#ff007f';
+        ctx.font = 'bold 18px "Courier New", monospace';
+        ctx.fillText('COCKTAILS', 140, 290);
+
+        // Dragon Shrine / Chinese Characters
+        ctx.fillStyle = '#e6b800';
+        ctx.font = '32px sans-serif';
+        ctx.fillText('夜市 天下無敵', 680, 220);
+
+        // Red Hanging Lanterns
+        const drawLantern = (x, y) => {
+            ctx.fillStyle = '#d62424';
+            ctx.beginPath();
+            ctx.arc(x, y, 18, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#ffcc00';
+            ctx.fillRect(x - 4, y + 18, 8, 12);
+        };
+        drawLantern(60, 180);
+        drawLantern(390, 180);
+        drawLantern(620, 150);
+        drawLantern(950, 150);
+
+        // Tiled Floor Ground
+        ctx.fillStyle = '#2b2136';
+        ctx.fillRect(0, 580, 1000, 170);
+        ctx.strokeStyle = '#3e324d';
+        ctx.lineWidth = 2;
+        for (let x = 0; x < 1000; x += 50) {
+            ctx.beginPath();
+            ctx.moveTo(x, 580);
+            ctx.lineTo(x, 750);
+            ctx.stroke();
+        }
+        for (let y = 580; y < 750; y += 30) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(1000, y);
+            ctx.stroke();
+        }
+
+        // Dragon Shrine Center Statue
+        ctx.fillStyle = '#221a2b';
+        ctx.fillRect(420, 320, 160, 260);
+        ctx.fillStyle = '#d4af37';
+        ctx.font = 'bold 42px sans-serif';
+        ctx.fillText('龍', 485, 420);
+
+        this.cache['stage_bg'] = canvas;
+        return canvas;
+    }
+}
+
+const gfx = new GraphicsGenerator();
+
+
+// ==========================================
+// 3. GAME ENGINE & SCENE STATE MACHINE
+// ==========================================
+class GameEngine {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.width = 1000;
+        this.height = 750;
+
+        this.keys = {};
+        this.currentScene = 'SPLASH'; // SPLASH, CHAR_SELECT, SETTINGS, COMBAT, HIGH_SCORE
+
+        // High Scores State
+        this.highScores = [
+            { name: 'JACK BURTON', score: 542300 },
+            { name: 'WANG CHI', score: 356200 },
+            { name: 'EGG SHEN', score: 285300 },
+            { name: 'MARGO', score: 198400 },
+            { name: 'GRACIE LAW', score: 142000 }
+        ];
+
+        // Character Select state
+        this.selectedCharP1 = 'JACK BURTON';
+        this.selectedCharCPU = 'LO PAN';
+
+        // Combat State Variables
+        this.combatState = null;
+
+        this.setupInput();
+        this.lastTime = performance.now();
+        requestAnimationFrame((t) => this.loop(t));
+    }
+
+    setupInput() {
+        window.addEventListener('keydown', (e) => {
+            this.keys[e.key.toUpperCase()] = true;
+            this.keys[e.code] = true;
+            audio.init();
+
+            // Scene navigation triggers
+            if (this.currentScene === 'SPLASH') {
+                if (e.code === 'Enter' || e.code === 'Space') {
+                    audio.playCoin();
+                    this.currentScene = 'CHAR_SELECT';
+                } else if (e.code === 'KeyO') {
+                    audio.playSelect();
+                    this.currentScene = 'SETTINGS';
+                }
+            } else if (this.currentScene === 'CHAR_SELECT') {
+                if (e.code === 'Enter' || e.code === 'Space') {
+                    audio.playSelect();
+                    this.startCombat();
+                } else if (e.code === 'KeyO') {
+                    audio.playSelect();
+                    this.currentScene = 'SETTINGS';
+                }
+            } else if (this.currentScene === 'SETTINGS') {
+                if (e.code === 'Escape' || e.code === 'Enter') {
+                    audio.playSelect();
+                    this.currentScene = 'SPLASH';
+                }
+            } else if (this.currentScene === 'HIGH_SCORE') {
+                if (e.code === 'Enter' || e.code === 'Space' || e.code === 'Escape') {
+                    audio.playSelect();
+                    this.currentScene = 'SPLASH';
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            this.keys[e.key.toUpperCase()] = false;
+            this.keys[e.code] = false;
+        });
+    }
+
+    startCombat() {
+        this.currentScene = 'COMBAT';
+        audio.startMusic();
+        this.combatState = {
+            timer: 99,
+            timerInterval: setInterval(() => {
+                if (this.combatState && this.combatState.timer > 0 && !this.combatState.winner) {
+                    this.combatState.timer--;
+                }
+            }, 1000),
+            p1: {
+                name: 'JACK BURTON',
+                x: 200,
+                y: 440,
+                vx: 0,
+                vy: 0,
+                hp: 100,
+                super: 0,
+                state: 'idle', // idle, walk, punch, kick, super, hit
+                stateTime: 0,
+                facing: 1,
+                speechBubbleTime: 0
+            },
+            p2: {
+                name: 'LO PAN',
+                x: 700,
+                y: 440,
+                vx: 0,
+                vy: 0,
+                hp: 100,
+                super: 0,
+                state: 'idle',
+                stateTime: 0,
+                facing: -1,
+                aiCooldown: 0
+            },
+            projectiles: [],
+            sparks: [],
+            winner: null
+        };
+    }
+
+    loop(timestamp) {
+        const dt = (timestamp - this.lastTime) / 1000;
+        this.lastTime = timestamp;
+
+        this.update(dt);
+        this.render();
+
+        requestAnimationFrame((t) => this.loop(t));
+    }
+
+    update(dt) {
+        if (this.currentScene === 'COMBAT' && this.combatState) {
+            this.updateCombat(dt);
+        }
+    }
+
+    updateCombat(dt) {
+        const cs = this.combatState;
+        if (cs.winner) return;
+
+        const p1 = cs.p1;
+        const p2 = cs.p2;
+
+        // --- P1 INPUT CONTROLS (WASD + J/K/L) ---
+        p1.vx = 0;
+        if (p1.state === 'idle' || p1.state === 'walk') {
+            if (this.keys['KeyA'] || this.keys['A']) {
+                p1.vx = -220;
+                p1.facing = -1;
+                p1.state = 'walk';
+            } else if (this.keys['KeyD'] || this.keys['D']) {
+                p1.vx = 220;
+                p1.facing = 1;
+                p1.state = 'walk';
+            } else {
+                p1.state = 'idle';
+            }
+
+            // Punch (J)
+            if (this.keys['KeyJ'] || this.keys['J']) {
+                p1.state = 'punch';
+                p1.stateTime = 0.25;
+                audio.playPunch();
+                this.checkHit(p1, p2, 60, 12, 'punch');
+            }
+            // Kick (K)
+            else if (this.keys['KeyK'] || this.keys['K']) {
+                p1.state = 'kick';
+                p1.stateTime = 0.35;
+                audio.playKick();
+                this.checkHit(p1, p2, 75, 18, 'kick');
+            }
+            // Super Attack (L) - "Reflexes!"
+            else if (this.keys['KeyL'] || this.keys['L']) {
+                if (p1.super >= 50) {
+                    p1.super -= 50;
+                    p1.state = 'super';
+                    p1.stateTime = 0.8;
+                    p1.speechBubbleTime = 1.2;
+                    audio.playSuper();
+                    this.checkHit(p1, p2, 90, 35, 'super');
+                }
+            }
+        } else {
+            p1.stateTime -= dt;
+            if (p1.stateTime <= 0) {
+                p1.state = 'idle';
+            }
+        }
+
+        if (p1.speechBubbleTime > 0) p1.speechBubbleTime -= dt;
+
+        p1.x += p1.vx * dt;
+        p1.x = Math.max(80, Math.min(880, p1.x));
+
+        // --- CPU AI FOR LO PAN ---
+        p2.aiCooldown -= dt;
+        if (p2.state === 'idle' || p2.state === 'walk') {
+            const dist = Math.abs(p1.x - p2.x);
+            p2.facing = p1.x < p2.x ? -1 : 1;
+
+            if (p2.aiCooldown <= 0) {
+                p2.aiCooldown = 0.6 + Math.random() * 0.5;
+
+                if (dist > 250) {
+                    // Cast Green Skull Projectile
+                    p2.state = 'magic';
+                    p2.stateTime = 0.4;
+                    audio.playFireball();
+                    cs.projectiles.push({
+                        x: p2.x + p2.facing * 40,
+                        y: p2.y + 20,
+                        vx: p2.facing * 380,
+                        owner: 'p2'
+                    });
+                } else {
+                    // Move or Melee Attack
+                    if (Math.random() < 0.6) {
+                        p2.state = 'punch';
+                        p2.stateTime = 0.3;
+                        audio.playPunch();
+                        this.checkHit(p2, p1, 60, 14, 'punch');
+                    } else {
+                        p2.vx = p2.facing * 180;
+                        p2.state = 'walk';
+                    }
+                }
+            }
+        } else {
+            p2.stateTime -= dt;
+            if (p2.stateTime <= 0) {
+                p2.state = 'idle';
+            }
+        }
+
+        p2.x += p2.vx * dt;
+        p2.x = Math.max(80, Math.min(880, p2.x));
+
+        // --- PROJECTILES UPDATE ---
+        for (let i = cs.projectiles.length - 1; i >= 0; i--) {
+            const proj = cs.projectiles[i];
+            proj.x += proj.vx * dt;
+
+            // Check hit against P1
+            if (proj.owner === 'p2' && Math.abs(proj.x - p1.x) < 35 && Math.abs(proj.y - (p1.y + 30)) < 50) {
+                p1.hp = Math.max(0, p1.hp - 16);
+                p1.super = Math.min(100, p1.super + 10);
+                p1.state = 'hit';
+                p1.stateTime = 0.2;
+                audio.playPunch();
+                cs.sparks.push({ x: proj.x, y: proj.y, life: 0.2 });
+                cs.projectiles.splice(i, 1);
+                continue;
+            }
+
+            if (proj.x < 0 || proj.x > 1000) {
+                cs.projectiles.splice(i, 1);
+            }
+        }
+
+        // --- SPARKS UPDATE ---
+        for (let i = cs.sparks.length - 1; i >= 0; i--) {
+            cs.sparks[i].life -= dt;
+            if (cs.sparks[i].life <= 0) cs.sparks.splice(i, 1);
+        }
+
+        // --- WINNER / KO CHECK ---
+        if (p1.hp <= 0 || p2.hp <= 0 || cs.timer <= 0) {
+            audio.playKO();
+            clearInterval(cs.timerInterval);
+            if (p1.hp > p2.hp) {
+                cs.winner = p1.name;
+            } else {
+                cs.winner = p2.name;
+            }
+
+            setTimeout(() => {
+                audio.stopMusic();
+                this.currentScene = 'HIGH_SCORE';
+            }, 3000);
+        }
+    }
+
+    checkHit(attacker, defender, range, damage, type) {
+        const cs = this.combatState;
+        const dist = Math.abs(attacker.x - defender.x);
+        if (dist <= range) {
+            defender.hp = Math.max(0, defender.hp - damage);
+            attacker.super = Math.min(100, attacker.super + 15);
+            defender.state = 'hit';
+            defender.stateTime = 0.25;
+            cs.sparks.push({ x: (attacker.x + defender.x) / 2, y: defender.y + 30, life: 0.25 });
+        }
+    }
+
+    render() {
+        this.ctx.clearRect(0, 0, this.width, this.height);
+
+        switch (this.currentScene) {
+            case 'SPLASH':
+                this.renderSplash();
+                break;
+            case 'CHAR_SELECT':
+                this.renderCharSelect();
+                break;
+            case 'SETTINGS':
+                this.renderSettings();
+                break;
+            case 'COMBAT':
+                this.renderCombat();
+                break;
+            case 'HIGH_SCORE':
+                this.renderHighScore();
+                break;
+        }
+    }
+
+    renderSplash() {
+        // Background
+        const bg = gfx.getStageBackground();
+        this.ctx.drawImage(bg, 0, 0);
+
+        // Dark Overlay
+        this.ctx.fillStyle = 'rgba(10, 5, 20, 0.75)';
+        this.ctx.fillRect(0, 0, 1000, 750);
+
+        // Title Header
+        this.ctx.textAlign = 'center';
+        this.ctx.fillStyle = '#ff2255';
+        this.ctx.font = 'bold 52px "Courier New", monospace';
+        this.ctx.fillText('BIG TROUBLE IN LITTLE CHINA', 500, 180);
+
+        this.ctx.fillStyle = '#ffcc00';
+        this.ctx.font = 'bold 32px "Courier New", monospace';
+        this.ctx.fillText('16-BIT ARCADE EDITION', 500, 240);
+
+        // Flashing "INSERT COIN / PRESS ENTER"
+        if (Math.floor(Date.now() / 500) % 2 === 0) {
+            this.ctx.fillStyle = '#00ffcc';
+            this.ctx.font = 'bold 36px "Courier New", monospace';
+            this.ctx.fillText('PRESS ENTER TO PLAY', 500, 420);
+        }
+
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = '22px "Courier New", monospace';
+        this.ctx.fillText('PRESS [O] FOR SETTINGS', 500, 520);
+
+        // High score teaser
+        this.ctx.fillStyle = '#ffaa00';
+        this.ctx.font = '20px "Courier New", monospace';
+        this.ctx.fillText('HIGH SCORE: 542300 (JACK BURTON)', 500, 650);
+    }
+
+    renderCharSelect() {
+        this.ctx.fillStyle = '#0f0a1c';
+        this.ctx.fillRect(0, 0, 1000, 750);
+
+        this.ctx.textAlign = 'center';
+        this.ctx.fillStyle = '#ffcc00';
+        this.ctx.font = 'bold 42px "Courier New", monospace';
+        this.ctx.fillText('SELECT YOUR FIGHTER', 500, 90);
+
+        // Player 1 Box (Jack Burton)
+        this.ctx.strokeStyle = '#00ffcc';
+        this.ctx.lineWidth = 4;
+        this.ctx.strokeRect(150, 160, 300, 420);
+        this.ctx.fillStyle = 'rgba(0, 255, 204, 0.1)';
+        this.ctx.fillRect(150, 160, 300, 420);
+
+        this.ctx.fillStyle = '#00ffcc';
+        this.ctx.font = 'bold 28px "Courier New", monospace';
+        this.ctx.fillText('PLAYER 1', 300, 200);
+
+        const jackSprite = gfx.getJackSprite('super');
+        this.ctx.drawImage(jackSprite, 240, 230, 120, 160);
+
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 24px "Courier New", monospace';
+        this.ctx.fillText('JACK BURTON', 300, 430);
+        this.ctx.font = '18px "Courier New", monospace';
+        this.ctx.fillText('STYLE: STREET BRAWLER', 300, 470);
+        this.ctx.fillText('SUPER: REFLEXES', 300, 500);
+
+        // CPU Box (Lo Pan)
+        this.ctx.strokeStyle = '#ff2255';
+        this.ctx.lineWidth = 4;
+        this.ctx.strokeRect(550, 160, 300, 420);
+        this.ctx.fillStyle = 'rgba(255, 34, 85, 0.1)';
+        this.ctx.fillRect(550, 160, 300, 420);
+
+        this.ctx.fillStyle = '#ff2255';
+        this.ctx.font = 'bold 28px "Courier New", monospace';
+        this.ctx.fillText('CPU OPPONENT', 700, 200);
+
+        const loPanSprite = gfx.getLoPanSprite('magic');
+        this.ctx.drawImage(loPanSprite, 635, 230, 130, 160);
+
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 24px "Courier New", monospace';
+        this.ctx.fillText('LO PAN', 700, 430);
+        this.ctx.font = '18px "Courier New", monospace';
+        this.ctx.fillText('STYLE: DARK MAGIC', 700, 470);
+        this.ctx.fillText('SUPER: GREEN SKULL', 700, 500);
+
+        // Start Prompt
+        if (Math.floor(Date.now() / 400) % 2 === 0) {
+            this.ctx.fillStyle = '#00ff66';
+            this.ctx.font = 'bold 30px "Courier New", monospace';
+            this.ctx.fillText('PRESS ENTER TO START MATCH!', 500, 640);
+        }
+    }
+
+    renderSettings() {
+        this.ctx.fillStyle = '#0d0914';
+        this.ctx.fillRect(0, 0, 1000, 750);
+
+        this.ctx.textAlign = 'center';
+        this.ctx.fillStyle = '#ffcc00';
+        this.ctx.font = 'bold 42px "Courier New", monospace';
+        this.ctx.fillText('SETTINGS & CONTROLS', 500, 100);
+
+        // Audio Settings Box
+        this.ctx.strokeStyle = '#00ffcc';
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeRect(200, 160, 600, 160);
+
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 22px "Courier New", monospace';
+        this.ctx.fillText('AUDIO CONFIGURATION', 500, 200);
+
+        this.ctx.textAlign = 'left';
+        this.ctx.font = '20px "Courier New", monospace';
+        this.ctx.fillText(`MUSIC VOLUME:  [==============     ] ${Math.round(audio.musicVolume * 100)}%`, 240, 245);
+        this.ctx.fillText(`SOUND FX VOL:  [=================  ] ${Math.round(audio.sfxVolume * 100)}%`, 240, 285);
+
+        // Control Scheme Box
+        this.ctx.textAlign = 'center';
+        this.ctx.strokeStyle = '#ff2255';
+        this.ctx.strokeRect(150, 360, 700, 260);
+
+        this.ctx.fillStyle = '#ffcc00';
+        this.ctx.font = 'bold 22px "Courier New", monospace';
+        this.ctx.fillText('KEYBOARD CONTROLS SCHEME', 500, 400);
+
+        this.ctx.textAlign = 'left';
+        this.ctx.fillStyle = '#00ffcc';
+        this.ctx.font = 'bold 20px "Courier New", monospace';
+        this.ctx.fillText('PLAYER 1 (JACK BURTON):', 180, 450);
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = '18px "Courier New", monospace';
+        this.ctx.fillText('Movement: [A] Left | [D] Right', 180, 485);
+        this.ctx.fillText('Attacks:  [J] Punch | [K] Kick | [L] Super "Reflexes!"', 180, 520);
+
+        this.ctx.fillStyle = '#ff2255';
+        this.ctx.font = 'bold 20px "Courier New", monospace';
+        this.ctx.fillText('PLAYER 2 / CPU (LO PAN):', 180, 560);
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = '18px "Courier New", monospace';
+        this.ctx.fillText('Preset: Arrow Keys + Numpad 1 / 2 / 3', 180, 595);
+
+        this.ctx.textAlign = 'center';
+        this.ctx.fillStyle = '#ffaa00';
+        this.ctx.fillText('PRESS [ESC] OR [ENTER] TO RETURN TO MAIN MENU', 500, 680);
+    }
+
+    renderCombat() {
+        const cs = this.combatState;
+        if (!cs) return;
+
+        // Render Stage Background
+        const bg = gfx.getStageBackground();
+        this.ctx.drawImage(bg, 0, 0);
+
+        // --- HUD OVERLAY ---
+        // Player 1 HUD (Jack Burton)
+        this.ctx.fillStyle = '#000000';
+        this.ctx.fillRect(50, 30, 360, 30);
+        this.ctx.fillStyle = '#ff2255';
+        this.ctx.fillRect(50, 30, (cs.p1.hp / 100) * 360, 30);
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = 3;
+        this.ctx.strokeRect(50, 30, 360, 30);
+
+        this.ctx.fillStyle = '#00ffcc';
+        this.ctx.font = 'bold 22px "Courier New", monospace';
+        this.ctx.textAlign = 'left';
+        this.ctx.fillText('1P: JACK BURTON', 50, 22);
+
+        // P1 Super Meter
+        this.ctx.fillStyle = '#000';
+        this.ctx.fillRect(50, 65, 200, 12);
+        this.ctx.fillStyle = '#00ffcc';
+        this.ctx.fillRect(50, 65, (cs.p1.super / 100) * 200, 12);
+        this.ctx.strokeRect(50, 65, 200, 12);
+
+        // Player 2 HUD (Lo Pan)
+        this.ctx.fillStyle = '#000000';
+        this.ctx.fillRect(590, 30, 360, 30);
+        this.ctx.fillStyle = '#ff2255';
+        this.ctx.fillRect(590 + (1 - cs.p2.hp / 100) * 360, 30, (cs.p2.hp / 100) * 360, 30);
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.strokeRect(590, 30, 360, 30);
+
+        this.ctx.fillStyle = '#ff2255';
+        this.ctx.font = 'bold 22px "Courier New", monospace';
+        this.ctx.textAlign = 'right';
+        this.ctx.fillText('CPU: LO PAN', 950, 22);
+
+        // Match Timer
+        this.ctx.fillStyle = '#000000';
+        this.ctx.fillRect(460, 20, 80, 50);
+        this.ctx.strokeStyle = '#ffcc00';
+        this.ctx.strokeRect(460, 20, 80, 50);
+
+        this.ctx.fillStyle = '#ffcc00';
+        this.ctx.font = 'bold 36px "Courier New", monospace';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(cs.timer.toString().padStart(2, '0'), 500, 58);
+
+        // --- CHARACTERS RENDER ---
+        // P1 Jack Burton
+        const p1Sprite = gfx.getJackSprite(cs.p1.state);
+        this.ctx.save();
+        this.ctx.translate(cs.p1.x, cs.p1.y);
+        if (cs.p1.facing === -1) {
+            this.ctx.scale(-1, 1);
+        }
+        this.ctx.drawImage(p1Sprite, -60, 0);
+        this.ctx.restore();
+
+        // Speech Bubble for Super Move ("It's all in the reflexes, old man!")
+        if (cs.p1.speechBubbleTime > 0) {
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.fillRect(cs.p1.x - 120, cs.p1.y - 60, 240, 45);
+            this.ctx.strokeStyle = '#000';
+            this.ctx.lineWidth = 2;
+            this.ctx.strokeRect(cs.p1.x - 120, cs.p1.y - 60, 240, 45);
+
+            this.ctx.fillStyle = '#000';
+            this.ctx.font = 'bold 14px "Courier New", monospace';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText("IT'S ALL IN THE", cs.p1.x, cs.p1.y - 40);
+            this.ctx.fillText("REFLEXES, OLD MAN!", cs.p1.x, cs.p1.y - 22);
+        }
+
+        // P2 Lo Pan
+        const p2Sprite = gfx.getLoPanSprite(cs.p2.state);
+        this.ctx.save();
+        this.ctx.translate(cs.p2.x, cs.p2.y);
+        if (cs.p2.facing === 1) {
+            this.ctx.scale(-1, 1);
+        }
+        this.ctx.drawImage(p2Sprite, -65, 0);
+        this.ctx.restore();
+
+        // --- PROJECTILES RENDER ---
+        const skullGfx = gfx.getGreenSkullSprite();
+        for (const proj of cs.projectiles) {
+            this.ctx.drawImage(skullGfx, proj.x - 25, proj.y - 25);
+        }
+
+        // --- HIT SPARKS RENDER ---
+        for (const spark of cs.sparks) {
+            this.ctx.fillStyle = '#ffff00';
+            this.ctx.beginPath();
+            this.ctx.arc(spark.x, spark.y, 20 * (spark.life / 0.25), 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+
+        // --- WINNER / KO OVERLAY ---
+        if (cs.winner) {
+            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            this.ctx.fillRect(0, 250, 1000, 200);
+
+            this.ctx.fillStyle = '#ff2255';
+            this.ctx.font = 'bold 72px "Courier New", monospace';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText('K. O. !', 500, 330);
+
+            this.ctx.fillStyle = '#00ffcc';
+            this.ctx.font = 'bold 36px "Courier New", monospace';
+            this.ctx.fillText(`${cs.winner} WINS!`, 500, 400);
+        }
+    }
+
+    renderHighScore() {
+        this.ctx.fillStyle = '#0c0617';
+        this.ctx.fillRect(0, 0, 1000, 750);
+
+        this.ctx.textAlign = 'center';
+        this.ctx.fillStyle = '#ffcc00';
+        this.ctx.font = 'bold 46px "Courier New", monospace';
+        this.ctx.fillText('TOP SCORE LEADERBOARD', 500, 100);
+
+        this.ctx.strokeStyle = '#ff2255';
+        this.ctx.lineWidth = 3;
+        this.ctx.strokeRect(150, 160, 700, 450);
+
+        this.ctx.font = '28px "Courier New", monospace';
+        this.highScores.forEach((entry, idx) => {
+            const y = 230 + idx * 70;
+            this.ctx.fillStyle = idx === 0 ? '#00ffcc' : '#ffffff';
+            this.ctx.textAlign = 'left';
+            this.ctx.fillText(`${idx + 1}. ${entry.name}`, 220, y);
+            this.ctx.textAlign = 'right';
+            this.ctx.fillText(`${entry.score}`, 780, y);
+        });
+
+        if (Math.floor(Date.now() / 400) % 2 === 0) {
+            this.ctx.textAlign = 'center';
+            this.ctx.fillStyle = '#00ff66';
+            this.ctx.font = 'bold 26px "Courier New", monospace';
+            this.ctx.fillText('PRESS ENTER FOR TITLE SCREEN', 500, 660);
+        }
+    }
+}
+
+// Launch Game on Window Load
+window.addEventListener('load', () => {
+    new GameEngine();
+});
+
+    </script>
+</body>
+</html>
